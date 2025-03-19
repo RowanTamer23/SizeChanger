@@ -1,6 +1,6 @@
-# rowanrasid
+# SizeChanger
 
-A new Flutter project.
+A new Flutter project that takes a photo and uploads to firebase then changes the size of it 
 
 ## Getting Started
 
