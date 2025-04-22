@@ -16,28 +16,34 @@ class TakepicScreen extends StatefulWidget {
 }
 
 class _TakepicScreenState extends State<TakepicScreen> {
-  File? _TakenImage;
-  String? downloadURL;
+  File? _takenImage;
+  String? _downloadUrl;
   bool _isUploading = false;
   bool _showContainer = false;
+  String? _errorMessage;
 
-  Future<void> _TakeAndUploadImage() async {
+  Future<void> _takeAndUploadImage() async {
     try {
       final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(source: ImageSource.camera);
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 100,
+        maxWidth: 1920,
+      );
 
       if (image == null) {
-        print("No image selected.");
+        _showError('No image was selected');
         return;
       }
 
       setState(() {
-        _TakenImage = File(image.path);
+        _takenImage = File(image.path);
+        _errorMessage = null;
       });
 
       await _uploadImageToFirebase(image.path);
     } catch (e) {
-      print('Error picking image: $e');
+      _showError('Error taking picture: $e');
     }
   }
 
@@ -45,21 +51,21 @@ class _TakepicScreenState extends State<TakepicScreen> {
     try {
       setState(() {
         _isUploading = true;
+        _errorMessage = null;
       });
-      FirebaseStorage storage = FirebaseStorage.instance;
-      Reference ref = storage
+
+      final storage = FirebaseStorage.instance;
+      final ref = storage
           .ref()
           .child('images/${DateTime.now().millisecondsSinceEpoch}.jpg');
+      final imageFile = File(imagePath);
 
-      File imageFile = File(imagePath);
       await ref.putFile(imageFile);
-
-      String url = await ref.getDownloadURL();
-      print("Image uploaded! Download URL: $url");
+      final url = await ref.getDownloadURL();
 
       if (mounted) {
         setState(() {
-          downloadURL = url;
+          _downloadUrl = url;
           _isUploading = false;
         });
       }
@@ -79,8 +85,8 @@ class _TakepicScreenState extends State<TakepicScreen> {
     } catch (e) {
       setState(() {
         _isUploading = false;
+        _errorMessage = 'Error uploading image: $e';
       });
-      print('Error uploading image: $e');
     }
   }
 
@@ -90,49 +96,83 @@ class _TakepicScreenState extends State<TakepicScreen> {
     });
   }
 
+  void _showError(String message) {
+    setState(() {
+      _errorMessage = message;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Take Picture')),
+      appBar: AppBar(
+        title: const Text('Take Picture'),
+        centerTitle: true,
+      ),
       body: Center(
         child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              ElevatedButton(
-                onPressed: _TakeAndUploadImage,
-                child: const Text('Take Picture'),
+              if (_errorMessage != null)
+                Container(
+                  padding: const EdgeInsets.all(8.0),
+                  margin: const EdgeInsets.only(bottom: 16.0),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade100,
+                    borderRadius: BorderRadius.circular(8.0),
+                  ),
+                  child: Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              ElevatedButton.icon(
+                onPressed: _isUploading ? null : _takeAndUploadImage,
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('Take Picture'),
+                style: ElevatedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
               ),
-              if (_TakenImage != null)
-                Column(children: [
-                  ElevatedButton(
-                    onPressed: _toggleContainer,
-                    child: Text(_showContainer ? 'hide' : 'show'),
-                  ),
-                  SizedBox(
-                    height: 20,
-                  ),
-                  if (_showContainer)
-                    Container(
-                      width: 400,
-                      height: 250,
-                      alignment: Alignment.center,
+              if (_takenImage != null) ...[
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _toggleContainer,
+                  child: Text(_showContainer ? 'Hide Preview' : 'Show Preview'),
+                ),
+                const SizedBox(height: 20),
+                if (_showContainer)
+                  Container(
+                    width: MediaQuery.of(context).size.width * 0.8,
+                    height: 250,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8.0),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8.0),
                       child: Image.file(
-                        _TakenImage!,
+                        _takenImage!,
                         fit: BoxFit.cover,
                       ),
                     ),
-                  SizedBox(
-                    height: 20,
-                  )
-                ]),
+                  ),
+              ],
               const SizedBox(height: 20),
-              if (downloadURL != null) // Show only if URL is available
-                ElevatedButton(
-                  onPressed: () => _launchURL(downloadURL!),
-                  child: const Text('View'),
+              if (_downloadUrl != null)
+                ElevatedButton.icon(
+                  onPressed: () => _launchURL(_downloadUrl!),
+                  icon: const Icon(Icons.link),
+                  label: const Text('View Uploaded Image'),
                 ),
-              if (_isUploading) const CircularProgressIndicator()
+              if (_isUploading)
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: CircularProgressIndicator(),
+                ),
             ],
           ),
         ),
@@ -143,9 +183,11 @@ class _TakepicScreenState extends State<TakepicScreen> {
   Future<void> _launchURL(String url) async {
     final Uri uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not launch $url')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch $url')),
+        );
+      }
     }
   }
 }
